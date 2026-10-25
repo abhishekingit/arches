@@ -6,6 +6,7 @@
 #include "trax-kernel/include.hpp"
 #include "trax-kernel/intersect.hpp"
 #include "units/unit-texture.hpp"
+#include "bc1.hpp"
 
 namespace Arches {
 
@@ -803,6 +804,7 @@ static void run_sim_trax(SimulationConfig& sim_config)
 
 int main(int argc, char* argv[])
 {
+	test_bc1_solid_color();
 	Arches::set_full_exe_name(argv[0]);
 	Arches::SimulationConfig sim_config;
 	sim_config.set_param("config-dir", Arches::get_default_config_dir());

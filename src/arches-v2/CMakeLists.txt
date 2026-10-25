@@ -14,6 +14,7 @@ set(ARCHES_SOURCES
   "util/file.cpp"
   "util/stbi.cpp"
   "util/string.cpp"
+  "bc1.cpp"
 )
 
 file(GLOB_RECURSE ARCHES_HEADERS CONFIGURE_DEPENDS "*.hpp" "*.h")
