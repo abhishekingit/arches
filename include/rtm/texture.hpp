@@ -22,7 +22,7 @@ inline void require_rgba8_texture_format(TextureFormat format)
 {
 	if(format == TextureFormat::RGBA8) return;
 	if(format == TextureFormat::BC1)
-		fprintf(stderr, "Error: --texture-format=bc1 is selected, but BC1 texture uploads and sampling are not implemented.\n");
+		fprintf(stderr, "Error: --texture-format=bc1 is selected, but BC1 texture sampling is not implemented; rendering is disabled.\n");
 	else
 		fprintf(stderr, "Error: unsupported texture format %u.\n", static_cast<uint32_t>(format));
 	exit(EXIT_FAILURE);
@@ -44,8 +44,10 @@ struct Texture2DMetadata
 	int32_t comp{0};
 	TextureFormat format{TextureFormat::RGBA8};
 	// Host texel pointer in native views; simulated data address in uploaded views.
-	// RGBA8: Morton-ordered Texels. BC1: reserved for a future block-data base;
-	// never use RGBA8 texel indexing on that address. BC1 uploads are unsupported.
+	// RGBA8: Morton-ordered Texels. BC1: row-major 4x4 blocks, eight bytes each.
+	// BC1 grid: blocks_x = (width + 3) / 4, blocks_y = (height + 3) / 4.
+	// Block (bx, by) is at byte offset 8 * (by * blocks_x + bx) from this base;
+	// never use RGBA8 Texel pointer arithmetic on a BC1 data address.
 	Texel* texels{nullptr};
 };
 

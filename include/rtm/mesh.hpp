@@ -23,7 +23,7 @@ struct MaterialData
 	uint8_t use_am : 1;
 	uint8_t use_rm : 1;
 	uint8_t use_mm : 1;
-	Texture2D albedo_texture;
+	Texture albedo_texture;
 	rtm::vec3 albedo;
 	float roughness;
 	float metalness;

@@ -153,6 +153,7 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 	std::string scene_name = sim_config.get_string("scene-name");
 	std::string datasets_folder = ensure_trailing_slash(sim_config.get_string("dataset-dir"));
 	std::string cache_folder = datasets_folder + "cache/";
+	const TextureFormat texture_format = sim_config.get_texture_format();
 
 	TRaXKernelArgs args{};
 	args.framebuffer_width = sim_config.get_int("framebuffer-width");
@@ -168,13 +169,15 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 	args.light_dir = rtm::normalize(rtm::vec3(4.5f, 42.5f, 5.0f));
 	args.camera = sim_config.camera;
 
-	rtm::Mesh mesh(datasets_folder + scene_name + ".obj", sim_config.get_texture_format());
+	// Keep the original host texels in RGBA8 for encoding and host-side ray setup.
+	// The selected format applies to simulated texture storage, not host ownership.
+	rtm::Mesh mesh(datasets_folder + scene_name + ".obj", TextureFormat::RGBA8);
 
 	for (uint material_index = 0; material_index < mesh.materials.size(); material_index++) {
 		
 		const rtm::Material& material = mesh.materials[material_index];
 
-		if (!material.use_am) {
+		if (!material.use_am || texture_format == TextureFormat::BC1) {
 			continue;
 		}
 
@@ -237,9 +240,35 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 	{
 		if(!mesh.materials[i].use_am)
 			continue;
-		Texture2D& tex = mesh.materials[i].albedo_texture;
-		Texture2D::Texel* dev_tex = write_array(drams, xbar, 256, tex.texels, tex.width * tex.height, heap_address);
-		materials[i].albedo_texture.texels = dev_tex;
+		const Texture2D& tex = mesh.materials[i].albedo_texture;
+		Texture2DMetadata& device_texture = materials[i].albedo_texture;
+		switch(texture_format)
+		{
+		case TextureFormat::RGBA8:
+			device_texture.texels = write_array(drams, xbar, 256, tex.texels, tex.width * tex.height, heap_address);
+			break;
+		case TextureFormat::BC1:
+		{
+			if(!tex.texels || tex.width <= 0 || tex.height <= 0 || tex.format != TextureFormat::RGBA8)
+			{
+				fprintf(stderr, "Error: material %u has no valid RGBA8 source texture for BC1 encoding.\n", i);
+				exit(EXIT_FAILURE);
+			}
+			const BC1Texture bc1 = encode_bc1_texture(tex);
+			// write_vector copies all block bytes before this temporary is destroyed.
+			BC1Block* dev_blocks = write_vector(drams, xbar, 256, bc1.blocks, heap_address);
+			device_texture.format = TextureFormat::BC1;
+			// Only the simulated block address is retained; the host texture is untouched.
+			// Original dimensions define the implicit block grid in Texture2DMetadata.
+			device_texture.texels = reinterpret_cast<Texture2D::Texel*>(dev_blocks);
+			printf("BC1 texture upload: material %u, %u x %u blocks, %zu bytes\n",
+				i, bc1.blocks_x, bc1.blocks_y, bc1.blocks.size() * sizeof(BC1Block));
+			break;
+		}
+		default:
+			fprintf(stderr, "Error: unsupported texture format %u.\n", static_cast<uint32_t>(texture_format));
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	paddr_t mat_addr = (paddr_t)args.materials;
@@ -253,7 +282,6 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 static void run_sim_trax(SimulationConfig& sim_config)
 {
 	const TextureFormat texture_format = sim_config.get_texture_format();
-	require_rgba8_texture_format(texture_format);
 #if 0 //RTX 4090 ish
 	//Compute
 	double core_clock = 2235.0e6;
@@ -554,6 +582,9 @@ static void run_sim_trax(SimulationConfig& sim_config)
 		drams[xbar.get_partition(addr)]->direct_write(vec_mem.data() + addr, partition_stride, xbar.strip_partition_bits(addr));
 
 	TRaXKernelArgs kernel_args = initilize_buffers((Units::UnitMainMemoryBase**)drams.data(), xbar, heap_address, sim_config, partition_stride);
+	// BC1 uploads and descriptor writes are complete, but sampling is not supported.
+	// Stop before constructing texture units or starting a rendering simulation.
+	require_rgba8_texture_format(texture_format);
 	heap_address = align_to(partition_stride, heap_address);
 
 	for(uint addr = 0; addr < (256 << 20); addr += partition_stride)
