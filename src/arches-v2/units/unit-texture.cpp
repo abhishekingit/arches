@@ -9,33 +9,34 @@ void UnitTexture::clock_rise()
 	if(_filter_pipline.is_write_valid() && cache->return_port_read_valid(cache_port))
 	{
 		MemoryReturn ret = cache->read_return(cache_port);
-		Sample& sample = _pending_samples[ret.dst.raw];
-
-		if(filter_mode == 0) //nearest
+		auto sample_it = _pending_samples.find(ret.dst.raw);
+		if(sample_it == _pending_samples.end() || ret.size != 32)
 		{
-			uint32_t block_offset = sample.texel_addrs[0] % 32;
-			uint32_t block_addr = sample.texel_addrs[0] - block_offset;
-
-			_assert(block_addr == ret.paddr);
-			std::memcpy(&sample.texels[0], ret.data + block_offset, sizeof(Texture2D::Texel));
-			sample.pending_texels--;
+			fprintf(stderr, "Error: texture cache return has no pending sample or an invalid size.\n");
+			exit(EXIT_FAILURE);
 		}
-		else
+		Sample& sample = sample_it->second;
+		for(uint32_t i = 0; i < sample.num_texels; ++i)
 		{
-			for(uint32_t i = 0; i < 4; ++i)
-			{
-				uint32_t block_offset = sample.texel_addrs[i] % 32;
-				uint32_t block_addr = sample.texel_addrs[i] - block_offset;
-				if(ret.paddr == block_addr)
-				{
-					std::memcpy(&sample.texels[i], ret.data + block_offset, sizeof(Texture2D::Texel));
-					sample.pending_texels--;
-				}
-			}
+			const uint32_t texel_bit = 1u << i;
+			if(!(sample.pending_texel_mask & texel_bit)) continue;
+			uint32_t block_offset = sample.texel_addrs[i] % 32;
+			paddr_t block_addr = sample.texel_addrs[i] - block_offset;
+			if(ret.paddr != block_addr) continue;
+
+			// One region return can satisfy several texels, including the same block.
+			if(sample.format == TextureFormat::BC1)
+				std::memcpy(&sample.bc1_blocks[i], ret.data + block_offset, sizeof(BC1Block));
+			else
+				std::memcpy(&sample.texels[i], ret.data + block_offset, sizeof(Texture2D::Texel));
+			sample.pending_texel_mask &= ~texel_bit;
 		}
 		
-		if(sample.pending_texels == 0)
+		if(sample.pending_texel_mask == 0)
+		{
 			_filter_pipline.write(sample);
+			_pending_samples.erase(sample_it);
+		}
 	}
 
 	if(_request_network.is_read_valid(0))
@@ -43,20 +44,49 @@ void UnitTexture::clock_rise()
 		MemoryRequest req = _request_network.read(0);
 		req.dst.push(req.port, 8);
 
-		Sample& sample = _pending_samples[req.dst.raw];
+		auto inserted = _pending_samples.emplace(req.dst.raw, Sample{});
+		if(!inserted.second)
+		{
+			fprintf(stderr, "Error: texture samples have duplicate in-flight destination tags.\n");
+			exit(EXIT_FAILURE);
+		}
+		Sample& sample = inserted.first->second;
 		sample.req = req;
 
 		rtm::vec2 uv;
 		std::memcpy(&uv, req.data, sizeof(rtm::vec2));
 		const Texture2DMetadata& metadata = *(const Texture2DMetadata*)&_cheat_mem[req.vaddr];
-		require_rgba8_texture_format(metadata.format);
+		sample.format = metadata.format;
+		if(metadata.format != TextureFormat::BC1)
+			require_rgba8_texture_format(metadata.format);
+		else if(!metadata.texels || metadata.width <= 0 || metadata.height <= 0 ||
+			reinterpret_cast<paddr_t>(metadata.texels) % sizeof(BC1Block) != 0)
+		{
+			fprintf(stderr, "Error: invalid BC1 texture dimensions or block-data alignment.\n");
+			exit(EXIT_FAILURE);
+		}
 		Texture2D texture(metadata);
+		auto set_texel_address = [&](uint32_t index, const rtm::uvec2& iuv)
+		{
+			if(sample.format == TextureFormat::RGBA8)
+			{
+				sample.texel_addrs[index] = (paddr_t)texture.get_texel_addr(iuv);
+				return;
+			}
+			// Match the existing coordinate wrapping before finding the row-major block.
+			const uint32_t x = iuv[0] % texture.width;
+			const uint32_t y = iuv[1] % texture.height;
+			const uint32_t blocks_x = (static_cast<uint32_t>(texture.width) + 3u) / 4u;
+			const paddr_t block_index = static_cast<paddr_t>(y / 4u) * blocks_x + x / 4u;
+			sample.texel_addrs[index] = reinterpret_cast<paddr_t>(metadata.texels) + block_index * sizeof(BC1Block);
+			sample.bc1_texel_indices[index] = static_cast<uint8_t>((y % 4u) * 4u + x % 4u);
+		};
 
 		if(filter_mode == 0) //nearest
 		{
 			rtm::uvec2 iuv = texture.get_iuv(uv, rtm::vec2(0.5f));
-			sample.texel_addrs[0] = (paddr_t)texture.get_texel_addr(iuv);
-			sample.pending_texels = 1;
+			set_texel_address(0, iuv);
+			sample.num_texels = 1;
 		}
 		else if(filter_mode == 1) //linear
 		{
@@ -69,20 +99,21 @@ void UnitTexture::clock_rise()
 			iuv[1][0] = texture.get_iuv(uv, rtm::vec2(0.0f, 1.0f));
 			iuv[1][1] = texture.get_iuv(uv, rtm::vec2(1.0f, 1.0f));
 
-			sample.texel_addrs[0] = (paddr_t)texture.get_texel_addr(iuv[0][0]);
-			sample.texel_addrs[1] = (paddr_t)texture.get_texel_addr(iuv[0][1]);
-			sample.texel_addrs[2] = (paddr_t)texture.get_texel_addr(iuv[1][0]);
-			sample.texel_addrs[3] = (paddr_t)texture.get_texel_addr(iuv[1][1]);
-			sample.pending_texels = 4;
+			set_texel_address(0, iuv[0][0]);
+			set_texel_address(1, iuv[0][1]);
+			set_texel_address(2, iuv[1][0]);
+			set_texel_address(3, iuv[1][1]);
+			sample.num_texels = 4;
 		}
 		else _assert(false);
 
+		sample.pending_texel_mask = (1u << sample.num_texels) - 1u;
 		uint32_t block_cnt = 0;
 		paddr_t blocks[4];
-		for(uint32_t i = 0; i < sample.pending_texels; ++i)
+		for(uint32_t i = 0; i < sample.num_texels; ++i)
 		{
 			uint32_t block_offset = sample.texel_addrs[i] % 32;
-			uint32_t block_addr = sample.texel_addrs[i] - block_offset;
+			paddr_t block_addr = sample.texel_addrs[i] - block_offset;
 
 			MemoryRequest texel_req;
 			log.texels++;
@@ -113,6 +144,8 @@ void UnitTexture::clock_fall()
 	if(_filter_pipline.is_read_valid() && _return_network.is_write_valid(0))
 	{
 		Sample sample = _filter_pipline.read();
+		// Keep undecoded BC1 blocks out of the RGBA8 filtering path.
+		require_rgba8_texture_format(sample.format);
 
 		MemoryReturn ret2(sample.req);
 		ret2.size = sizeof(rtm::vec4);

@@ -2,6 +2,7 @@
 #include "stdafx.hpp"
 
 #include "unit-memory-base.hpp"
+#include "bc1.hpp"
 
 #include "util/arbitration.hpp"
 
@@ -34,13 +35,19 @@ private:
 	struct Sample
 	{
 		rtm::vec2 fract_uv;
+		TextureFormat format{TextureFormat::RGBA8};
+		// RGBA8 texel addresses or BC1 block addresses, one per sampled texel.
 		paddr_t texel_addrs[8];
 		Texture2D::Texel texels[8];
-		uint32_t pending_texels;
+		BC1Block bc1_blocks[8];
+		uint8_t bc1_texel_indices[8];
+		uint32_t num_texels{0};
+		// A dependency is cleared only once, even when addresses are duplicated.
+		uint32_t pending_texel_mask{0};
 		MemoryRequest req;
 	};
 
-	std::unordered_map<uint32_t, Sample> _pending_samples;
+	std::unordered_map<uint64_t, Sample> _pending_samples;
 	std::queue<MemoryRequest> _texel_fill_queue;
 	LatencyFIFO<Sample> _filter_pipline;
 
@@ -48,7 +55,9 @@ public:
 	UnitTexture(const Configuration& config) : UnitMemoryBase(), cache(config.cache), cache_port(config.cache_port), _cheat_mem(config.cheat_mem),
 		_filter_pipline(10), _request_network(config.num_clients, 1), _return_network(1, config.num_clients)
 	{
-		require_rgba8_texture_format(config.texture_format);
+		// BC1 fetches may be staged; decoding remains guarded in clock_fall().
+		if(config.texture_format != TextureFormat::BC1)
+			require_rgba8_texture_format(config.texture_format);
 	}
 
 	void clock_rise() override;
