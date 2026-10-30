@@ -169,6 +169,28 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 	args.camera = sim_config.camera;
 
 	rtm::Mesh mesh(datasets_folder + scene_name + ".obj");
+
+	for (uint material_index = 0; material_index < mesh.materials.size(); material_index++) {
+		
+		const rtm::Material& material = mesh.materials[material_index];
+
+		if (!material.use_am) {
+			continue;
+		}
+
+		const Texture2D& texture = material.albedo_texture;
+
+		fprintf(stderr,
+			"BC1 test: material %u | albedo texture %u x %u | texels=%p\n",
+			material_index,
+			texture.width,
+			texture.height,
+			static_cast<void*>(texture.texels));
+		fflush(stderr);
+		test_bc1_texture(texture);
+		break;
+	}
+
 	rtm::CWBVH bvh(mesh, (cache_folder + scene_name + ".bvh").c_str(), sim_config.get_int("bvh-preset"), sim_config.get_int("bvh-merging"));
 
 	std::vector<rtm::Ray> rays(args.framebuffer_size);

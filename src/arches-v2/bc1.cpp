@@ -133,3 +133,126 @@ void test_bc1_solid_color() {
 
 	printf("BC1 solid color test passed.\n");
 }
+
+
+BC1Texture encode_bc1_texture(const Texture2D& texture) {
+	BC1Texture output;
+	output.width = texture.width;
+	output.height = texture.height;
+	output.blocks_x = (texture.width + 3) / 4;
+	output.blocks_y = (texture.height + 3) / 4;
+
+	uint tex_width = static_cast<uint>(texture.width);
+	uint tex_height = static_cast<uint>(texture.height);
+
+	_assert(tex_width > 0);
+	_assert(tex_height > 0);
+
+
+	output.blocks.resize(output.blocks_x * output.blocks_y);
+
+	for (uint block_y = 0; block_y < output.blocks_y; block_y++) {
+		for (uint block_x = 0; block_x < output.blocks_x; block_x++) {
+			rtm::vec4 texels[16];
+
+			for (uint local_y = 0; local_y < 4; local_y++) {
+				for (uint local_x = 0; local_x < 4; local_x++) {
+					uint x = std::min(block_x * 4u + local_x, tex_width - 1u);
+					uint y = std::min(block_y * 4u + local_y, tex_height - 1u);
+
+					rtm::uvec2 iuv(x, y);
+					uint block_index = local_y * 4u + local_x;
+
+					texels[block_index] = Texture2D::decode_texel(*texture.get_texel_addr(iuv));
+				}
+			}
+			output.blocks[block_y * output.blocks_x + block_x] = encode_bc1_block(texels);
+		}
+	}
+
+	return output;
+}
+
+rtm::vec4 decode_bc1_texture_texel(const BC1Texture& bc1_texture, uint32_t x, uint32_t y) {
+	_assert(x < bc1_texture.width);
+	_assert(y < bc1_texture.height);
+
+	uint32_t block_x = x / 4;
+	uint32_t block_y = y / 4;
+
+	uint32_t block_index = block_y * bc1_texture.blocks_x + block_x;
+
+	uint32_t local_x = x % 4;
+	uint32_t local_y = y % 4;
+
+	uint32_t local_texel_index = local_y * 4 + local_x;
+
+	return decode_bc1_texel(bc1_texture.blocks[block_index], local_texel_index);
+}
+
+void test_bc1_texture(const Texture2D& texture) {
+	BC1Texture bc1_texture = encode_bc1_texture(texture);
+
+	uint32_t width = static_cast<uint32_t>(texture.width);
+	uint32_t height = static_cast<uint32_t>(texture.height);
+
+	size_t raw_bytes = static_cast<size_t>(width) * height * sizeof(Texture2D::Texel);
+
+	size_t bc1_bytes = bc1_texture.blocks.size() * sizeof(BC1Block);
+
+	double total_squared_error = 0.0;
+
+	std::vector<uint8_t> reference_pixels(texture.width * texture.height * 4);
+	std::vector<uint8_t> bc1_preview_pixels(texture.width * texture.height * 4);
+	//preview.resize(static_cast<size_t>(width) * height * 4);
+
+	for (uint32_t y = 0; y < height; y++) {
+		for (uint32_t x = 0; x < width; x++) {
+			uint32_t index = y * width + x;
+			uint32_t flipped_y = texture.height - 1 - y;
+			uint32_t output_index = flipped_y * width + x;
+			rtm::uvec2 iuv(x, y);
+
+			rtm::vec4 original = Texture2D::decode_texel(*texture.get_texel_addr(iuv));
+
+			rtm::vec4 decoded = decode_bc1_texture_texel(bc1_texture, x, y);
+
+			float dr = original.x - decoded.x;
+			float dg = original.y - decoded.y;
+			float db = original.z - decoded.z;
+
+			total_squared_error += dr * dr + dg * dg + db * db;
+
+			auto to_byte = [](float value) -> uint8_t {
+				return static_cast<uint8_t>(
+					std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+				};
+
+			reference_pixels[output_index * 4 + 0] = to_byte(original.x);
+			reference_pixels[output_index * 4 + 1] = to_byte(original.y);
+			reference_pixels[output_index * 4 + 2] = to_byte(original.z);
+			reference_pixels[output_index * 4 + 3] = to_byte(original.w);
+
+			bc1_preview_pixels[output_index * 4 + 0] = to_byte(decoded.x);
+			bc1_preview_pixels[output_index * 4 + 1] = to_byte(decoded.y);
+			bc1_preview_pixels[output_index * 4 + 2] = to_byte(decoded.z);
+			bc1_preview_pixels[output_index * 4 + 3] = 255; // expected for now
+
+			
+
+		}
+	}
+
+	double mse = total_squared_error / static_cast<double>(width * height);
+
+	double compression_ratio = static_cast<double>(raw_bytes) / bc1_bytes;
+
+	fprintf(stderr,
+		"BC1 texture: %u x %u | raw: %zu B | BC1: %zu B | ratio: %.2fx | MSE: %.8f\n",
+		width, height, raw_bytes, bc1_bytes, compression_ratio, mse);
+
+	stbi_write_png("bc1_reference_leaf.png", static_cast<int>(width), static_cast<int>(height), 4, reference_pixels.data(), static_cast<int>(width * 4));
+
+	stbi_write_png("bc1_texture_preview_leaf.png", static_cast<int>(width), static_cast<int>(height), 4, bc1_preview_pixels.data(), static_cast<int>(width * 4));
+
+}
