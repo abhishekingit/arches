@@ -12,6 +12,28 @@ namespace Units {
 class UnitTexture : public UnitMemoryBase
 {
 public:
+	enum class FilterMode : uint32_t
+	{
+		NEAREST = 0,
+		LINEAR = 1,
+	};
+
+	static void require_supported_filter(TextureFormat format, FilterMode mode)
+	{
+		if(format != TextureFormat::BC1)
+			require_rgba8_texture_format(format);
+		if(mode != FilterMode::NEAREST && mode != FilterMode::LINEAR)
+		{
+			fprintf(stderr, "Error: unsupported texture filter mode.\n");
+			exit(EXIT_FAILURE);
+		}
+		if(format == TextureFormat::BC1 && mode != FilterMode::NEAREST)
+		{
+			fprintf(stderr, "Error: BC1 bilinear sampling is not supported; select --texture-filter=nearest.\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	struct Configuration
 	{
 		uint            num_clients{1};
@@ -19,6 +41,7 @@ public:
 		UnitMemoryBase* cache{nullptr};
 		uint            cache_port{0};
 		TextureFormat   texture_format{TextureFormat::RGBA8};
+		FilterMode      filter_mode{FilterMode::LINEAR};
 	};
 
 private:
@@ -28,7 +51,7 @@ private:
 	Cascade<MemoryRequest, RoundRobinArbiter<uint128_t>> _request_network;
 	ReturnCascade _return_network;
 
-	uint32_t filter_mode{1};
+	const FilterMode filter_mode;
 
 	uint8_t* _cheat_mem;
 
@@ -52,12 +75,10 @@ private:
 	LatencyFIFO<Sample> _filter_pipline;
 
 public:
-	UnitTexture(const Configuration& config) : UnitMemoryBase(), cache(config.cache), cache_port(config.cache_port), _cheat_mem(config.cheat_mem),
+	UnitTexture(const Configuration& config) : UnitMemoryBase(), cache(config.cache), cache_port(config.cache_port), filter_mode(config.filter_mode), _cheat_mem(config.cheat_mem),
 		_filter_pipline(10), _request_network(config.num_clients, 1), _return_network(1, config.num_clients)
 	{
-		// BC1 fetches may be staged; decoding remains guarded in clock_fall().
-		if(config.texture_format != TextureFormat::BC1)
-			require_rgba8_texture_format(config.texture_format);
+		require_supported_filter(config.texture_format, filter_mode);
 	}
 
 	void clock_rise() override;

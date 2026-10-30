@@ -26,6 +26,7 @@ void UnitTexture::clock_rise()
 
 			// One region return can satisfy several texels, including the same block.
 			if(sample.format == TextureFormat::BC1)
+				// Reconstruct the eight-byte block without alignment-dependent buffer casts.
 				std::memcpy(&sample.bc1_blocks[i], ret.data + block_offset, sizeof(BC1Block));
 			else
 				std::memcpy(&sample.texels[i], ret.data + block_offset, sizeof(Texture2D::Texel));
@@ -57,10 +58,10 @@ void UnitTexture::clock_rise()
 		std::memcpy(&uv, req.data, sizeof(rtm::vec2));
 		const Texture2DMetadata& metadata = *(const Texture2DMetadata*)&_cheat_mem[req.vaddr];
 		sample.format = metadata.format;
-		if(metadata.format != TextureFormat::BC1)
-			require_rgba8_texture_format(metadata.format);
-		else if(!metadata.texels || metadata.width <= 0 || metadata.height <= 0 ||
-			reinterpret_cast<paddr_t>(metadata.texels) % sizeof(BC1Block) != 0)
+		require_supported_filter(metadata.format, filter_mode);
+		if(metadata.format == TextureFormat::BC1 &&
+			(!metadata.texels || metadata.width <= 0 || metadata.height <= 0 ||
+			reinterpret_cast<paddr_t>(metadata.texels) % sizeof(BC1Block) != 0))
 		{
 			fprintf(stderr, "Error: invalid BC1 texture dimensions or block-data alignment.\n");
 			exit(EXIT_FAILURE);
@@ -82,13 +83,13 @@ void UnitTexture::clock_rise()
 			sample.bc1_texel_indices[index] = static_cast<uint8_t>((y % 4u) * 4u + x % 4u);
 		};
 
-		if(filter_mode == 0) //nearest
+		if(filter_mode == FilterMode::NEAREST)
 		{
 			rtm::uvec2 iuv = texture.get_iuv(uv, rtm::vec2(0.5f));
 			set_texel_address(0, iuv);
 			sample.num_texels = 1;
 		}
-		else if(filter_mode == 1) //linear
+		else if(filter_mode == FilterMode::LINEAR)
 		{
 			sample.fract_uv = texture.get_fract_uv(uv);
 
@@ -144,16 +145,17 @@ void UnitTexture::clock_fall()
 	if(_filter_pipline.is_read_valid() && _return_network.is_write_valid(0))
 	{
 		Sample sample = _filter_pipline.read();
-		// Keep undecoded BC1 blocks out of the RGBA8 filtering path.
-		require_rgba8_texture_format(sample.format);
+		require_supported_filter(sample.format, filter_mode);
 
 		MemoryReturn ret2(sample.req);
 		ret2.size = sizeof(rtm::vec4);
 		ret2.dst.pop(8);
 
-		if(filter_mode == 0)
+		if(filter_mode == FilterMode::NEAREST)
 		{
-			rtm::vec4 color = Texture2D::decode_texel(sample.texels[0]);
+			rtm::vec4 color = sample.format == TextureFormat::BC1
+				? decode_bc1_texel(sample.bc1_blocks[0], sample.bc1_texel_indices[0])
+				: Texture2D::decode_texel(sample.texels[0]);
 			std::memcpy(ret2.data, &color, sizeof(rtm::vec4));
 		}
 		else

@@ -282,6 +282,18 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 static void run_sim_trax(SimulationConfig& sim_config)
 {
 	const TextureFormat texture_format = sim_config.get_texture_format();
+	const std::string texture_filter = sim_config.get_string("texture-filter");
+	Units::UnitTexture::FilterMode filter_mode;
+	if(texture_filter == "nearest")
+		filter_mode = Units::UnitTexture::FilterMode::NEAREST;
+	else if(texture_filter == "linear")
+		filter_mode = Units::UnitTexture::FilterMode::LINEAR;
+	else
+	{
+		fprintf(stderr, "Error: unknown texture-filter '%s' (expected nearest or linear).\n", texture_filter.c_str());
+		exit(EXIT_FAILURE);
+	}
+	Units::UnitTexture::require_supported_filter(texture_format, filter_mode);
 #if 0 //RTX 4090 ish
 	//Compute
 	double core_clock = 2235.0e6;
@@ -582,9 +594,6 @@ static void run_sim_trax(SimulationConfig& sim_config)
 		drams[xbar.get_partition(addr)]->direct_write(vec_mem.data() + addr, partition_stride, xbar.strip_partition_bits(addr));
 
 	TRaXKernelArgs kernel_args = initilize_buffers((Units::UnitMainMemoryBase**)drams.data(), xbar, heap_address, sim_config, partition_stride);
-	// BC1 uploads and descriptor writes are complete, but sampling is not supported.
-	// Stop before constructing texture units or starting a rendering simulation.
-	require_rgba8_texture_format(texture_format);
 	heap_address = align_to(partition_stride, heap_address);
 
 	for(uint addr = 0; addr < (256 << 20); addr += partition_stride)
@@ -671,6 +680,7 @@ static void run_sim_trax(SimulationConfig& sim_config)
 		tu_config.cache_port = num_tps + 1;
 		tu_config.cheat_mem = vec_mem.data();
 		tu_config.texture_format = texture_format;
+		tu_config.filter_mode = filter_mode;
 
 		tus.push_back(_new  Units::UnitTexture(tu_config));
 		simulator.register_unit(tus.back());
@@ -869,6 +879,7 @@ int main(int argc, char* argv[])
 	Arches::SimulationConfig sim_config;
 	sim_config.set_param("config-dir", Arches::get_default_config_dir());
 	sim_config.set_param("kernel-path", Arches::get_default_kernel_path());
+	sim_config.set_param("texture-filter", "linear");
 	sim_config.parse(argc, argv);
 
 	Arches::TRaX::run_sim_trax(sim_config);

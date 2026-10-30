@@ -22,7 +22,7 @@ inline void require_rgba8_texture_format(TextureFormat format)
 {
 	if(format == TextureFormat::RGBA8) return;
 	if(format == TextureFormat::BC1)
-		fprintf(stderr, "Error: --texture-format=bc1 is selected, but BC1 texture sampling is not implemented; rendering is disabled.\n");
+		fprintf(stderr, "Error: this host texture path requires RGBA8; BC1 data must be sampled through UnitTexture.\n");
 	else
 		fprintf(stderr, "Error: unsupported texture format %u.\n", static_cast<uint32_t>(format));
 	exit(EXIT_FAILURE);
