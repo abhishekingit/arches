@@ -40,5 +40,5 @@ struct TRaXKernelArgs
 	rtm::vec2* tex_coords;
 
 	uint* material_indices;
-	rtm::Material* materials;
+	rtm::MaterialMetadata* materials;
 };

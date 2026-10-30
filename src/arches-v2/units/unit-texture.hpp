@@ -17,6 +17,7 @@ public:
 		uint8_t*        cheat_mem{nullptr};
 		UnitMemoryBase* cache{nullptr};
 		uint            cache_port{0};
+		TextureFormat   texture_format{TextureFormat::RGBA8};
 	};
 
 private:
@@ -47,6 +48,7 @@ public:
 	UnitTexture(const Configuration& config) : UnitMemoryBase(), cache(config.cache), cache_port(config.cache_port), _cheat_mem(config.cheat_mem),
 		_filter_pipline(10), _request_network(config.num_clients, 1), _return_network(1, config.num_clients)
 	{
+		require_rgba8_texture_format(config.texture_format);
 	}
 
 	void clock_rise() override;

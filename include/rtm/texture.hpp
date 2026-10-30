@@ -1,36 +1,70 @@
 #pragma once
 #include "vec3.hpp"
+#include <cstdint>
 
 #ifndef __riscv
 #include "stbi/stb_image.h"
 #include "stbi/stb_image_write.h"
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
 #endif
 
-class Texture2D
+enum class TextureFormat : uint32_t
 {
-public:
+	RGBA8 = 0,
+	BC1 = 1,
+};
+
+#ifndef __riscv
+inline void require_rgba8_texture_format(TextureFormat format)
+{
+	if(format == TextureFormat::RGBA8) return;
+	if(format == TextureFormat::BC1)
+		fprintf(stderr, "Error: --texture-format=bc1 is selected, but BC1 texture uploads and sampling are not implemented.\n");
+	else
+		fprintf(stderr, "Error: unsupported texture format %u.\n", static_cast<uint32_t>(format));
+	exit(EXIT_FAILURE);
+}
+#endif
+
+// Shared, non-owning texture metadata for the 64-bit host and TRaX kernel ABI.
+// Only this view, never Texture2D's host ownership state, is uploaded.
+struct Texture2DMetadata
+{
 	union Texel
 	{
 		uint8_t channel[4];
 		uint32_t raw;
 	};
 
-	int32_t width;
-	int32_t height;
-	int32_t comp;
-	Texel* texels;
+	int32_t width{0};
+	int32_t height{0};
+	int32_t comp{0};
+	TextureFormat format{TextureFormat::RGBA8};
+	// Host texel pointer in native views; simulated data address in uploaded views.
+	// RGBA8: Morton-ordered Texels. BC1: reserved for a future block-data base;
+	// never use RGBA8 texel indexing on that address. BC1 uploads are unsupported.
+	Texel* texels{nullptr};
+};
 
+class Texture2D : public Texture2DMetadata
+{
 private:
 	// allows Arches to shallow copy textures
 	// not to be used by kernels!!!
 	int32_t *pRefCount;
 
 public:
-	Texture2D() : texels(nullptr), pRefCount(nullptr) {};
+	Texture2D() : pRefCount(nullptr) {};
+	// A borrowed metadata view does not acquire or release host texel storage.
+	explicit Texture2D(const Texture2DMetadata& metadata) : Texture2DMetadata(metadata), pRefCount(nullptr) {}
 #ifndef __riscv
-	Texture2D(std::string filename)
+	Texture2D(std::string filename, TextureFormat texture_format = TextureFormat::RGBA8) : Texture2D()
 	{
+		require_rgba8_texture_format(texture_format);
+		format = texture_format;
 		printf("Loading: %s\r", filename.c_str());
 		stbi_set_flip_vertically_on_load(true);
 
@@ -59,7 +93,7 @@ public:
 		}
 	}
 
-	Texture2D(const Texture2D& other) : width(other.width), height(other.height), comp(other.comp)
+	Texture2D(const Texture2D& other) : Texture2DMetadata(other)
     {
 		other.acquire();
 		texels = other.texels;
@@ -75,6 +109,7 @@ public:
 		width = other.width;
         height = other.height;
         comp = other.comp;
+		format = other.format;
 
 		// following order is safer than 'first release, then acquire'
 		other.acquire();       // prebook ownership of new resource
@@ -110,6 +145,14 @@ public:
 
 	Texel* get_texel_addr(const rtm::uvec2& iuv) const
 	{
+		if(format != TextureFormat::RGBA8)
+		{
+		#ifndef __riscv
+			require_rgba8_texture_format(format);
+		#else
+			__builtin_trap();
+		#endif
+		}
 		uint32_t x = iuv[0] % width;
 		uint32_t y = iuv[1] % height;
 	#if 0

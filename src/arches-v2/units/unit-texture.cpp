@@ -48,7 +48,9 @@ void UnitTexture::clock_rise()
 
 		rtm::vec2 uv;
 		std::memcpy(&uv, req.data, sizeof(rtm::vec2));
-		Texture2D& texture = *(Texture2D*)&_cheat_mem[req.vaddr];
+		const Texture2DMetadata& metadata = *(const Texture2DMetadata*)&_cheat_mem[req.vaddr];
+		require_rgba8_texture_format(metadata.format);
+		Texture2D texture(metadata);
 
 		if(filter_mode == 0) //nearest
 		{

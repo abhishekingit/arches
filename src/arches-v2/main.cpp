@@ -168,7 +168,7 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 	args.light_dir = rtm::normalize(rtm::vec3(4.5f, 42.5f, 5.0f));
 	args.camera = sim_config.camera;
 
-	rtm::Mesh mesh(datasets_folder + scene_name + ".obj");
+	rtm::Mesh mesh(datasets_folder + scene_name + ".obj", sim_config.get_texture_format());
 
 	for (uint material_index = 0; material_index < mesh.materials.size(); material_index++) {
 		
@@ -205,7 +205,15 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 		args.rays = write_vector(drams, xbar, 256, rays, heap_address);
 	}
 
-	args.materials = write_vector(drams, xbar, 256, mesh.materials, heap_address);
+	std::vector<rtm::MaterialMetadata> materials;
+	materials.reserve(mesh.materials.size());
+	for(const rtm::Material& material : mesh.materials)
+	{
+		materials.push_back(rtm::material_metadata(material));
+		// Reserve the material table without copying host data addresses.
+		materials.back().albedo_texture.texels = nullptr;
+	}
+	args.materials = write_vector(drams, xbar, 256, materials, heap_address);
 
 	args.nodes = write_vector(drams, xbar, 256, bvh.nodes, heap_address);
 
@@ -231,15 +239,11 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 			continue;
 		Texture2D& tex = mesh.materials[i].albedo_texture;
 		Texture2D::Texel* dev_tex = write_array(drams, xbar, 256, tex.texels, tex.width * tex.height, heap_address);
-		free(tex.texels);
-		tex.texels = dev_tex;
+		materials[i].albedo_texture.texels = dev_tex;
 	}
 
 	paddr_t mat_addr = (paddr_t)args.materials;
-	args.materials = write_vector(drams, xbar, 256, mesh.materials, mat_addr);
-
-	for(uint32_t i = 0; i < mesh.materials.size(); ++i)
-		mesh.materials[i].albedo_texture.texels = nullptr;  // to not free device memory textures
+	args.materials = write_vector(drams, xbar, 256, materials, mat_addr);
 
 	size_t temp = TRAX_KERNEL_ARGS_ADDRESS;
 	write_array(drams, xbar, 256, (uint8_t*)&args, sizeof(TRaXKernelArgs), temp);
@@ -248,6 +252,8 @@ static TRaXKernelArgs initilize_buffers(Units::UnitMainMemoryBase** drams, const
 
 static void run_sim_trax(SimulationConfig& sim_config)
 {
+	const TextureFormat texture_format = sim_config.get_texture_format();
+	require_rgba8_texture_format(texture_format);
 #if 0 //RTX 4090 ish
 	//Compute
 	double core_clock = 2235.0e6;
@@ -633,6 +639,7 @@ static void run_sim_trax(SimulationConfig& sim_config)
 		tu_config.cache = l1ds.back();
 		tu_config.cache_port = num_tps + 1;
 		tu_config.cheat_mem = vec_mem.data();
+		tu_config.texture_format = texture_format;
 
 		tus.push_back(_new  Units::UnitTexture(tu_config));
 		simulator.register_unit(tus.back());

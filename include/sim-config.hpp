@@ -74,6 +74,7 @@ public:
 		set_param("max-rays", 128);
 		set_param("dataset-dir", default_dataset_dir());
 		set_param("scene-name", "sponza");
+		set_param("texture-format", "rgba8");
 		set_param("framebuffer-width", 1024);
 		set_param("framebuffer-height", 1024);
 		set_param("pregen-rays", 0);
@@ -97,6 +98,7 @@ public:
 			parse_param(arg.substr(2, split_pos - 2), arg.substr(split_pos + 1));
 		}
 
+		get_texture_format(); // Validate the shared option before initializing a scene.
 		set_param("arch-id", index_of(arch_names, get_string("arch-name"), "arch-name"));
 
 		int scene_id = -1;
@@ -119,6 +121,14 @@ public:
 	int get_int(const std::string& key) const { return find(key, Param::INT)->second.i; }
 	float get_float(const std::string& key) const { return find(key, Param::FLOAT)->second.f; }
 	std::string get_string(const std::string& key) const { return find(key, Param::STRING)->second.s; }
+	TextureFormat get_texture_format() const
+	{
+		const std::string value = get_string("texture-format");
+		if(value == "rgba8") return TextureFormat::RGBA8;
+		if(value == "bc1") return TextureFormat::BC1;
+		printf("Error: unknown texture-format '%s' (expected rgba8 or bc1)\n", value.c_str());
+		exit(1);
+	}
 
 	void set_param(const std::string& key, int value) { _params[key].type = Param::INT; _params[key].i = value; }
 	void set_param(const std::string& key, float value) { _params[key].type = Param::FLOAT; _params[key].f = value; }

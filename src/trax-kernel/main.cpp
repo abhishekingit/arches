@@ -114,7 +114,7 @@ inline static void kernel(const TRaXKernelArgs& args)
 		if(hit.t < ray.t_max)
 		{
 			uint32_t mat_id = args.material_indices[hit.id];
-			rtm::Material& mat = args.materials[mat_id];
+			rtm::MaterialMetadata& mat = args.materials[mat_id];
 			rtm::uvec3 tci = args.tex_coord_indices[hit.id];
 			rtm::vec2 tc = args.tex_coords[tci[0]] * hit.bc[0] + args.tex_coords[tci[1]] * hit.bc[1] + args.tex_coords[tci[2]] * (1.0f - hit.bc[0] - hit.bc[1]);
 
@@ -213,7 +213,11 @@ int main(int argc, char* argv[])
 	std::string mesh_path = dataset_dir + "/" + scene_name + ".obj";
 	std::string bvh_cache_path = dataset_dir + "/cache/" + scene_name + ".bvh";
 
-	rtm::Mesh mesh(mesh_path);
+	rtm::Mesh mesh(mesh_path, sim_config.get_texture_format());
+	std::vector<rtm::MaterialMetadata> materials;
+	materials.reserve(mesh.materials.size());
+	for(const rtm::Material& material : mesh.materials)
+		materials.push_back(rtm::material_metadata(material));
 
 #if 0
 	for(uint32_t i = 4; i < 5; ++i)
@@ -318,7 +322,7 @@ int main(int argc, char* argv[])
 	args.tex_coords = mesh.tex_coords.data();
 
 	args.material_indices = mesh.material_indices.data();
-	args.materials = mesh.materials.data();
+	args.materials = materials.data();
 
 	printf("\nStarting Traversal\n");
 	auto start = std::chrono::high_resolution_clock::now();

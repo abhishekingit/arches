@@ -8,7 +8,8 @@
 
 namespace rtm {
 
-struct Material
+template<typename Texture>
+struct MaterialData
 {
 	enum
 	{
@@ -28,6 +29,28 @@ struct Material
 	float metalness;
 	float ior;
 };
+
+using Material = MaterialData<Texture2D>;
+using MaterialMetadata = MaterialData<Texture2DMetadata>;
+
+#ifndef __riscv
+// Copy only rendering fields; Texture2D's host reference count stays in the mesh.
+inline MaterialMetadata material_metadata(const Material& material)
+{
+	MaterialMetadata metadata{};
+	metadata.model = material.model;
+	metadata.use_nm = material.use_nm;
+	metadata.use_am = material.use_am;
+	metadata.use_rm = material.use_rm;
+	metadata.use_mm = material.use_mm;
+	metadata.albedo_texture = material.albedo_texture;
+	metadata.albedo = material.albedo;
+	metadata.roughness = material.roughness;
+	metadata.metalness = material.metalness;
+	metadata.ior = material.ior;
+	return metadata;
+}
+#endif
 
 }
 
@@ -64,9 +87,13 @@ public:
 	std::vector<Texture2D> textures;
 	std::vector<Material> materials;
 
+private:
+	TextureFormat _texture_format;
+
 public:
-	Mesh(std::string file_path) : mtl_lib("")
+	Mesh(std::string file_path, TextureFormat texture_format = TextureFormat::RGBA8) : mtl_lib(""), _texture_format(texture_format)
 	{
+		require_rgba8_texture_format(_texture_format);
  		if(!load_obj(file_path.c_str()))
 		{
 			printf("Mesh: failed to load mesh OBJ file %s\n", file_path.c_str());
@@ -513,7 +540,7 @@ public:
 				if(data[index - 2] == 'd') //map_Kd
 				{
 					std::string str = swap_path(read_str(data, index), texture_path);
-					materials.back().albedo_texture = Texture2D(str);
+					materials.back().albedo_texture = Texture2D(str, _texture_format);
 					materials.back().use_am = 1;
 				}
 				//else if(data[index - 2] == 's') //map_Ns

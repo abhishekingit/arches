@@ -44,7 +44,7 @@ inline void ebreak()
 	#endif
 }
 
-rtm::vec4 inline sample2d(Texture2D* texture, rtm::vec2 uv)
+rtm::vec4 inline sample2d(Texture2DMetadata* texture, rtm::vec2 uv)
 {
 #ifdef __riscv
 	uint32_t addr = (uint64_t)texture;
@@ -60,6 +60,11 @@ rtm::vec4 inline sample2d(Texture2D* texture, rtm::vec2 uv)
 	asm volatile(".insn i 0xb, 0x6, %0, %4, 0\n\t" : "=f" (dst0), "=f" (dst1), "=f" (dst2), "=f" (dst3) : "f" (src0), "f" (src1), "f" (src2));
 	return rtm::vec4(dst0, dst1, dst2, dst3);
 #else
-	return texture->sample(uv);
+	return Texture2D(*texture).sample(uv);
 #endif
+}
+
+rtm::vec4 inline sample2d(Texture2D* texture, rtm::vec2 uv)
+{
+	return sample2d(static_cast<Texture2DMetadata*>(texture), uv);
 }
