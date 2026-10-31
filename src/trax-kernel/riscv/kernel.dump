@@ -76,7 +76,7 @@ Disassembly of section .text:
    10154:	1b803583          	ld	a1,440(zero) # 1b8 <main-0xff30>
    10158:	ffff0737          	lui	a4,0xffff0
    1015c:	00331693          	slli	a3,t1,0x3
-   10160:	006686b3          	add	a3,a3,t1
+   10160:	406686b3          	sub	a3,a3,t1
    10164:	00369693          	slli	a3,a3,0x3
    10168:	00d586b3          	add	a3,a1,a3
    1016c:	0016c583          	lbu	a1,1(a3)

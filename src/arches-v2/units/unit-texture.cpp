@@ -161,10 +161,19 @@ void UnitTexture::clock_fall()
 		else
 		{
 			rtm::vec4 c[2][2];
-			c[0][0] = Texture2D::decode_texel(sample.texels[0]);
-			c[0][1] = Texture2D::decode_texel(sample.texels[1]);
-			c[1][0] = Texture2D::decode_texel(sample.texels[2]);
-			c[1][1] = Texture2D::decode_texel(sample.texels[3]);
+			if(sample.format == TextureFormat::BC1)
+			{
+				// Each footprint slot retains its own block and index across shared cache regions.
+				for(uint32_t i = 0; i < 4; ++i)
+					c[i / 2][i % 2] = decode_bc1_texel(sample.bc1_blocks[i], sample.bc1_texel_indices[i]);
+			}
+			else
+			{
+				c[0][0] = Texture2D::decode_texel(sample.texels[0]);
+				c[0][1] = Texture2D::decode_texel(sample.texels[1]);
+				c[1][0] = Texture2D::decode_texel(sample.texels[2]);
+				c[1][1] = Texture2D::decode_texel(sample.texels[3]);
+			}
 
 			c[0][0] = rtm::mix(c[0][0], c[0][1], sample.fract_uv[0]);
 			c[1][0] = rtm::mix(c[1][0], c[1][1], sample.fract_uv[0]);

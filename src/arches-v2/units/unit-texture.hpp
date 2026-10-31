@@ -27,11 +27,6 @@ public:
 			fprintf(stderr, "Error: unsupported texture filter mode.\n");
 			exit(EXIT_FAILURE);
 		}
-		if(format == TextureFormat::BC1 && mode != FilterMode::NEAREST)
-		{
-			fprintf(stderr, "Error: BC1 bilinear sampling is not supported; select --texture-filter=nearest.\n");
-			exit(EXIT_FAILURE);
-		}
 	}
 
 	struct Configuration
